@@ -35,6 +35,7 @@
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/focal64"
   config.vm.hostname = "ecommerce-vm"
+  config.vm.boot_timeout = 600
 
   # ---- Network Configuration ----
   # Private network: VM accessible at 192.168.56.10 from the host
@@ -78,5 +79,8 @@ Vagrant.configure("2") do |config|
   end
 
   # ---- SSH Configuration ----
+  # Vagrant uses port 22 for initial provisioning. After Ansible changes
+  # SSH to port 222, use: ssh -p 222 vagrant@192.168.56.10
+  # or: ssh -p 2222 vagrant@localhost (via port forwarding above)
   config.ssh.insert_key = true
 end
