@@ -48,8 +48,8 @@ Vagrant.configure("2") do |config|
   # ---- VM Resources ----
   config.vm.provider "virtualbox" do |vb|
     vb.name = "ecommerce-vm"
-    vb.memory = "4096"
-    vb.cpus = 2
+    vb.memory = "8192"
+    vb.cpus = 3
   end
 
   # ---- Port Range ----
