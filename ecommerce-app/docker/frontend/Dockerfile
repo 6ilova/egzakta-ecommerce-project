@@ -1,0 +1,70 @@
+# ============================================
+# Frontend Dockerfile — Angular + Nginx (Multi-Stage)
+# ============================================
+#
+# WHY MULTI-STAGE:
+#   Stage 1 installs ~300MB of Node modules and build tools.
+#   The final image only ships the compiled HTML/CSS/JS (~5MB) + Nginx (~25MB).
+#
+# WHY Node 14 (not 12 or 16+):
+#   - Angular 9 officially supports Node 10.13+ and Node 12/14
+#   - Node 12 is EOL since April 2022
+#   - Node 16+ introduces OpenSSL 3.0 which breaks older webpack builds
+#     (would require --openssl-legacy-provider flag)
+#   - Node 14 is the sweet spot: modern npm, compatible with Angular 9
+#
+# IMPORTANT — API URL HANDLING:
+#   The Angular source has hardcoded API URLs: http://localhost:8090/api
+#   In Docker, we DON'T modify the source code. Instead, Nginx intercepts
+#   /api requests and proxies them to the backend container. See nginx.conf.
+#
+# BUILD CONTEXT: Must be the project root (not this directory)
+#   docker build -f docker/frontend/Dockerfile .
+# ============================================
+
+# ---- Stage 1: Build ----
+FROM node:14-alpine AS build
+
+WORKDIR /app
+
+# Copy package files first — layer caching optimization.
+# npm ci is faster and more deterministic than npm install
+# (uses package-lock.json exactly).
+COPY frontend/angular-ecommerce/package.json frontend/angular-ecommerce/package-lock.json ./
+
+# --legacy-peer-deps: Some Angular 9 packages have peer dependency conflicts
+# with npm 7+ (which ships with Node 14). This flag ignores those warnings.
+RUN npm ci --legacy-peer-deps
+
+# Copy the rest of the Angular source
+COPY frontend/angular-ecommerce/ .
+
+# Build for production.
+# WHY npx ng build --prod:
+#   - npx runs the locally installed @angular/cli
+#   - --prod enables AOT compilation, tree shaking, minification
+#   - Output goes to dist/angular-ecommerce/ (defined in angular.json)
+RUN npx ng build --prod
+
+# ---- Stage 2: Serve ----
+# WHY nginx:1.24-alpine:
+#   - Nginx is the industry standard for serving static files
+#   - Alpine variant is ~25MB (vs ~140MB for Debian-based)
+#   - Nginx also handles our API reverse proxy (see nginx.conf)
+FROM nginx:1.24-alpine
+
+# Remove the default Nginx "Welcome" page config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Install our custom Nginx configuration (SPA routing + API proxy)
+COPY docker/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy the compiled Angular app from Stage 1.
+# CRITICAL: The output path is dist/angular-ecommerce/ (from angular.json
+# "outputPath": "dist/angular-ecommerce"), NOT just dist/.
+# Getting this wrong would result in an empty Nginx root and a blank page.
+COPY --from=build /app/dist/angular-ecommerce /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

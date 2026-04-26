@@ -1,0 +1,21 @@
+---
+# ============================================
+# Role: SSHD — Handlers
+# ============================================
+#
+# WHY HANDLERS (not inline service restart):
+#   Handlers only run when "notified" by a task that made a change.
+#   If the sshd_config template hasn't changed (idempotent re-run),
+#   the handler is NOT triggered, avoiding an unnecessary service restart.
+#   This is important because restarting SSHD disconnects all active sessions.
+#
+# WHY IN A SEPARATE FILE:
+#   Ansible role convention requires handlers in handlers/main.yml.
+#   Putting handlers inline in tasks/main.yml causes them to be treated
+#   as tasks, not handlers — the notification mechanism won't work.
+# ============================================
+
+- name: restart sshd
+  systemd:
+    name: sshd
+    state: restarted

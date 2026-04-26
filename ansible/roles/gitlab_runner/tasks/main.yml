@@ -1,0 +1,96 @@
+---
+# ============================================
+# Role: GitLab Runner
+# Install and register GitLab Runner on the VM
+# ============================================
+#
+# WHAT THIS DOES:
+#   1. Installs GitLab Runner from the official repository
+#   2. Adds gitlab-runner user to the docker group
+#   3. Registers the runner with the GitLab instance (if token provided)
+#
+# WHY THE RUNNER LIVES ON THE VM (not as a Docker container):
+#   The VM is the deployment target. With the runner ON the VM:
+#   - CI/CD jobs run directly on the VM
+#   - docker compose runs natively (no SSH tunneling needed)
+#   - The runner has direct access to the host Docker daemon
+#   - Simpler architecture: push → runner builds & deploys in one place
+#
+# WHY SHELL EXECUTOR (not Docker executor):
+#   Shell executor runs CI jobs directly on the VM as the gitlab-runner user.
+#   This means:
+#   - docker compose works natively against the host Docker daemon
+#   - No nested Docker containers (simpler, faster)
+#   - The runner can manage application containers directly
+#   - Build artifacts persist on the VM (Docker layer cache)
+#
+#   Docker executor would run each CI job in a throwaway container,
+#   requiring Docker socket mounts and losing build cache between jobs.
+#
+# HOW TO REGISTER:
+#   1. Start GitLab: cd gitlab/ && docker compose up -d
+#   2. Get token: GitLab UI → Admin Area → CI/CD → Runners
+#   3. Run Ansible:
+#      ansible-playbook playbook.yml --tags gitlab_runner \
+#        -e "gitlab_runner_token=YOUR_TOKEN ansible_port=222"
+# ============================================
+
+- name: Add GitLab Runner GPG key
+  apt_key:
+    url: https://packages.gitlab.com/runner/gitlab-runner/gpgkey
+    state: present
+
+- name: Add GitLab Runner repository
+  apt_repository:
+    repo: "deb https://packages.gitlab.com/runner/gitlab-runner/ubuntu/ {{ ansible_distribution_release }} main"
+    state: present
+    update_cache: yes
+
+- name: Install GitLab Runner
+  apt:
+    name: gitlab-runner
+    state: present
+
+# The gitlab-runner user needs Docker access to run docker compose
+# in CI/CD jobs without sudo.
+- name: Add gitlab-runner user to docker group
+  user:
+    name: gitlab-runner
+    groups: docker
+    append: yes
+
+- name: Register GitLab Runner
+  command: >
+    gitlab-runner register
+    --non-interactive
+    --url "{{ gitlab_url }}"
+    --registration-token "{{ gitlab_runner_token }}"
+    --executor "shell"
+    --description "vm-shell-runner"
+    --tag-list "deploy,vm"
+    --run-untagged="true"
+    --locked="false"
+  when: gitlab_runner_token is defined and gitlab_runner_token | length > 0
+  register: runner_registration
+  changed_when: runner_registration.rc == 0
+  # WHY --executor "shell":
+  #   Jobs run directly on the VM. docker compose commands work natively.
+  #   No need for Docker-in-Docker or socket mounts.
+  #
+  # WHY --run-untagged:
+  #   Accept jobs even without matching tags (simpler pipeline config).
+
+- name: Enable and start GitLab Runner service
+  systemd:
+    name: gitlab-runner
+    enabled: yes
+    state: restarted
+
+- name: Display registration note (if no token provided)
+  debug:
+    msg: >
+      GitLab Runner installed but NOT registered (no token provided).
+      To register, run:
+      ansible-playbook playbook.yml --tags gitlab_runner
+      -e "gitlab_runner_token=YOUR_TOKEN ansible_port=222"
+  when: gitlab_runner_token is not defined

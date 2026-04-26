@@ -1,0 +1,49 @@
+# {{ ansible_managed }}
+# ============================================
+# SSH Server Configuration
+# ============================================
+#
+# This file is managed by Ansible. Manual changes will be overwritten
+# on the next playbook run.
+#
+# Port changed from default 22 to {{ ssh_port }}
+#
+# WHY THESE SETTINGS:
+#   - PermitRootLogin prohibit-password: Allow root login ONLY with SSH keys,
+#     never with password. Balances security with emergency access.
+#   - PubkeyAuthentication yes: SSH keys are the primary auth method.
+#   - PasswordAuthentication yes: Kept for Vagrant compatibility.
+#     In production, set to 'no' and use keys only.
+# ============================================
+
+Port {{ ssh_port }}
+AddressFamily any
+ListenAddress 0.0.0.0
+ListenAddress ::
+
+# Authentication
+PermitRootLogin prohibit-password
+PubkeyAuthentication yes
+PasswordAuthentication yes
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+
+# Security limits
+MaxAuthTries 5
+MaxSessions 10
+X11Forwarding yes
+PrintMotd no
+
+# Keep alive — detect and disconnect dead sessions
+# Server sends a keepalive every 120s, disconnects after 3 missed replies
+ClientAliveInterval 120
+ClientAliveCountMax 3
+
+# PAM (Pluggable Authentication Modules)
+UsePAM yes
+
+# SFTP subsystem for file transfer
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# Accept locale-related environment variables from the client
+AcceptEnv LANG LC_*

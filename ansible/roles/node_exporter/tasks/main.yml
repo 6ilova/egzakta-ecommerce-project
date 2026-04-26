@@ -1,0 +1,95 @@
+---
+# ============================================
+# Role: Node Exporter
+# Install Prometheus Node Exporter as a systemd service
+# ============================================
+#
+# WHAT IS NODE EXPORTER:
+#   Node Exporter is a Prometheus agent that exposes hardware and OS
+#   metrics (CPU, memory, disk, network) via HTTP on port 9100.
+#   A Prometheus server can scrape these metrics for monitoring/alerting.
+#
+# WHY BINARY INSTALL (not Docker):
+#   Node Exporter monitors the HOST machine's metrics. Running it in
+#   Docker would only show the container's metrics, not the host's.
+#   Direct binary installation gives accurate host-level metrics.
+#
+# WHY SYSTEMD:
+#   systemd provides automatic restart on failure, boot startup,
+#   structured logging (journalctl), and process supervision.
+#   This is production-grade process management.
+# ============================================
+
+- name: Create node_exporter system user
+  user:
+    name: node_exporter
+    shell: /bin/false     # No login shell — security best practice
+    system: yes           # System user (low UID, no home directory)
+    create_home: no
+  # WHY dedicated user: Principle of least privilege. Node Exporter
+  # doesn't need root access. Running as a dedicated user limits
+  # what a compromised process can do.
+
+- name: Download Node Exporter v{{ node_exporter_version }}
+  get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp/node_exporter.tar.gz
+    mode: '0644'
+
+- name: Extract Node Exporter
+  unarchive:
+    src: /tmp/node_exporter.tar.gz
+    dest: /tmp/
+    remote_src: yes   # File is already on the remote machine
+
+- name: Install Node Exporter binary
+  copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    owner: node_exporter
+    group: node_exporter
+    mode: '0755'
+    remote_src: yes
+
+- name: Create Node Exporter systemd service
+  copy:
+    dest: /etc/systemd/system/node_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus Node Exporter
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=node_exporter
+      Group=node_exporter
+      Type=simple
+      ExecStart=/usr/local/bin/node_exporter --web.listen-address=:9100
+
+      [Install]
+      WantedBy=multi-user.target
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+  # WHY: After creating a new .service file, systemd needs to
+  # re-read its configuration to discover the new service.
+
+- name: Enable and start Node Exporter
+  systemd:
+    name: node_exporter
+    enabled: yes      # Start on boot
+    state: started    # Start now
+
+- name: Clean up download artifacts
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /tmp/node_exporter.tar.gz
+    - "/tmp/node_exporter-{{ node_exporter_version }}.linux-amd64"
+  # WHY cleanup: Don't leave tarballs in /tmp. Keeps the VM tidy
+  # and avoids confusion on re-runs.

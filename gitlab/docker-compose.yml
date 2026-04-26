@@ -1,0 +1,76 @@
+# ============================================
+# GitLab CE — Docker Compose
+# ============================================
+#
+# HOW TO USE:
+#   cd gitlab/
+#   docker compose up -d
+#
+#   # Wait 3-5 minutes for GitLab to initialize, then:
+#   docker exec -it gitlab grep 'Password:' /etc/gitlab/initial_root_password
+#
+#   # Open http://localhost:8080 — login as root with the password above
+#
+# RESOURCE REQUIREMENTS:
+#   GitLab CE needs at least 4GB RAM (8GB recommended).
+#   The config below includes memory optimizations.
+#
+# WHY SELF-HOSTED GITLAB (not GitHub Actions):
+#   The task explicitly requires "locally run GitLab" and "register a
+#   GitLab runner". This compose file provides the GitLab server.
+#   The runner is installed on the VM via Ansible (not here).
+#
+# WHY NO RUNNER IN THIS FILE:
+#   The GitLab Runner lives on the Ubuntu VM (installed by Ansible).
+#   Since the VM is the deployment target, the runner can execute
+#   docker compose directly without SSH. Having the runner here
+#   would add unnecessary SSH complexity.
+# ============================================
+
+services:
+  gitlab:
+    image: gitlab/gitlab-ce:latest
+    container_name: gitlab
+    hostname: gitlab.local
+    restart: unless-stopped
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        # External URL — includes port 8080 so GitLab generates correct
+        # clone URLs (e.g., http://192.168.56.1:8080/root/project.git).
+        # Uses host IP on VirtualBox network so the VM runner can reach it.
+        external_url 'http://192.168.56.1:8080'
+
+        # IMPORTANT: Nginx inside the container listens on port 80 (default).
+        # Docker maps host port 8080 → container port 80.
+        # Without this, both Nginx and Puma try to bind to 8080 and crash.
+        nginx['listen_port'] = 80
+        nginx['listen_https'] = false
+
+        # Custom SSH port for Git operations (avoids conflict with host's port 22)
+        gitlab_rails['gitlab_shell_ssh_port'] = 2224
+
+        # ---- Memory Optimizations ----
+        puma['worker_processes'] = 2
+        sidekiq['concurrency'] = 5
+
+        # Disable built-in Prometheus — we use Node Exporter on the VM instead.
+        prometheus_monitoring['enable'] = false
+
+        # ---- Container Registry ----
+        registry_external_url 'http://192.168.56.1:5050'
+        registry['enable'] = true
+    ports:
+      # Host 8080 → Container 80 (Nginx default)
+      - "8080:80"
+      - "2224:22"      # Git SSH operations
+      - "5050:5050"    # Container Registry
+    volumes:
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+    shm_size: '256m'
+
+volumes:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:

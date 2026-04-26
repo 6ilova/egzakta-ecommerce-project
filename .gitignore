@@ -1,0 +1,36 @@
+# ============================================
+# .gitignore
+# ============================================
+
+# Environment files (contain passwords — never commit)
+.env
+
+# Vagrant VM state
+.vagrant/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (if building locally)
+node_modules/
+
+# Maven (if building locally)
+target/
+
+# Docker Compose overrides (local dev customizations)
+docker-compose.override.yml
+
+# Ansible retry files
+*.retry
+
+# SSH keys (never commit private keys)
+*.pem
+id_rsa
+id_rsa.pub

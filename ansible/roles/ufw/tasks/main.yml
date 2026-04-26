@@ -1,0 +1,90 @@
+---
+# ============================================
+# Role: UFW (Uncomplicated Firewall)
+# ============================================
+#
+# WHAT THIS DOES:
+#   Configures the Linux firewall to:
+#   - DENY all incoming traffic by default
+#   - ALLOW only specific ports: 222 (SSH), 8000 (App), 9100 (Node Exporter)
+#   - ALLOW all outgoing traffic (the VM needs to download packages, etc.)
+#
+# WHY THESE PORTS:
+#   222  — Custom SSH port (task requirement)
+#   8000 — E-commerce application (task requirement: "running on port 8000")
+#   9100 — Node Exporter metrics endpoint (for Prometheus monitoring)
+#
+# LOCKOUT PREVENTION:
+#   The playbook runs SSHD role BEFORE this UFW role. By the time UFW
+#   enables, SSH is already on port 222. We also temporarily allow port 22
+#   as a safety net during the transition, then remove it.
+# ============================================
+
+- name: Install UFW
+  apt:
+    name: ufw
+    state: present
+
+- name: Set UFW default policy - deny incoming
+  ufw:
+    direction: incoming
+    policy: deny
+  # WHY deny by default: Principle of least privilege.
+  # Only explicitly allowed ports are accessible.
+
+- name: Set UFW default policy - allow outgoing
+  ufw:
+    direction: outgoing
+    policy: allow
+  # WHY allow outgoing: The VM needs to reach the internet for
+  # apt updates, Docker image pulls, git clone, etc.
+
+- name: Allow SSH on port {{ ssh_port }}
+  ufw:
+    rule: allow
+    port: "{{ ssh_port }}"
+    proto: tcp
+    comment: "SSH (custom port)"
+
+- name: Allow application on port {{ app_port | default(8000) }}
+  ufw:
+    rule: allow
+    port: "{{ app_port | default(8000) }}"
+    proto: tcp
+    comment: "E-Commerce Application"
+
+- name: Allow Node Exporter on port 9100
+  ufw:
+    rule: allow
+    port: "9100"
+    proto: tcp
+    comment: "Prometheus Node Exporter"
+
+# SAFETY NET: Temporarily allow port 22 during the transition.
+# If something went wrong with the SSHD role and SSH is still on 22,
+# this prevents a total lockout.
+- name: Temporarily allow port 22 (safety during SSH port migration)
+  ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    comment: "Temporary - default SSH"
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+    logging: "on"
+  # WHY logging: Logs blocked connection attempts to /var/log/ufw.log.
+  # Useful for debugging connectivity issues.
+
+# Clean up: Remove the temporary port 22 rule.
+# At this point SSH is on 222 and port 222 is allowed, so port 22 is no longer needed.
+- name: Remove temporary port 22 rule
+  ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+    delete: yes
+  when: ssh_port != 22
+  # WHY conditional: If ssh_port is somehow set to 22 (not our case),
+  # don't delete the rule we just created.

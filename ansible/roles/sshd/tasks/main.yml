@@ -1,0 +1,44 @@
+---
+# ============================================
+# Role: SSHD — Tasks
+# Change SSH port from default 22 to 222
+# ============================================
+#
+# WHY CHANGE THE SSH PORT:
+#   1. Task requirement: "sshd service with changed default port 22 -> 222"
+#   2. Security through obscurity: Port 22 is constantly scanned by bots.
+#      Moving to a non-standard port reduces automated attack noise.
+#      (This is NOT a substitute for proper auth — it's an additional layer.)
+#
+# WHY TEMPLATE (not lineinfile):
+#   Using a full template gives us complete control over sshd_config.
+#   lineinfile can break if the file has unexpected formatting or
+#   duplicate entries. A template is idempotent and predictable.
+#
+# SAFETY:
+#   The 'validate' parameter runs 'sshd -t' to check the config syntax
+#   BEFORE applying it. If the config is invalid, Ansible aborts and
+#   the current (working) config stays in place. This prevents lockouts.
+# ============================================
+
+- name: Configure SSH to listen on port {{ ssh_port }}
+  template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0644'
+    validate: '/usr/sbin/sshd -t -f %s'
+  notify: restart sshd
+
+- name: Ensure SSH service is enabled
+  systemd:
+    name: sshd
+    enabled: yes
+    state: started
+
+# Force handler execution immediately (don't wait until end of play).
+# This ensures SSH is already on port 222 before the UFW role runs,
+# which needs to know the correct port to allow.
+- name: Flush handlers to apply SSH config now
+  meta: flush_handlers
