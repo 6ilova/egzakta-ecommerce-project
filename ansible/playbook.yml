@@ -8,6 +8,7 @@
     node_exporter_version: "1.7.0"
     deploy_user: vagrant
 
+# Roles - order matters!
   roles:
     - role: docker
       tags: docker
