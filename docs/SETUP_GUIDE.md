@@ -31,25 +31,51 @@ The e-commerce application source is already in `ecommerce-app/backend/` and `ec
 ```bash
 vagrant up        # Takes 5-10 minutes on first run
 vagrant status    # Verify VM is running
-vagrant ssh       # Test SSH access
-exit
 ```
 
 The VM will be available at `192.168.56.10`.
 
 ---
 
-## 3. Start GitLab Locally
+## 3. Configure the VM with Ansible
 
-GitLab runs as a Docker container on your host machine (not the VM).
+Ansible runs **inside the VM** via Vagrant's `ansible_local` provisioner
+
+```bash
+# From the project root
+vagrant provision
+```
+
+This takes 5-10 minutes and configures:
+- Docker CE + Docker Compose
+- Node Exporter (port 9100)
+- SSH port changed from 22 → 222
+- FW firewall (allow 222, 8000, 9100)
+- GitLab Runner installed (not yet registered)
+
+Verify:
+
+```bash
+ssh -p 222 vagrant@192.168.56.10
+
+docker --version          # Docker installed
+sudo ufw status           # Firewall active
+curl localhost:9100/metrics | head -5   # Node Exporter running
+sudo ss -tlnp | grep sshd              # SSH on port 222
+
+exit
+```
+---
+
+## 4. Start GitLab Locally
+
+GitLab runs as a Docker container on host machine.
 
 ```bash
 cd gitlab/
 docker compose up -d
-
-# Wait 3-5 minutes for GitLab to initialize:
 docker logs -f gitlab
-# Wait until you see "gitlab Reconfigured!" — then Ctrl+C
+# Wait for "gitlab Reconfigured!"
 ```
 
 ### Get the initial root password
@@ -57,8 +83,7 @@ docker logs -f gitlab
 ```bash
 docker exec -it gitlab grep 'Password:' /etc/gitlab/initial_root_password
 ```
-
-**Save this password** — it's deleted after 24 hours.
+Save this password
 
 ### Access GitLab
 
@@ -68,7 +93,7 @@ docker exec -it gitlab grep 'Password:' /etc/gitlab/initial_root_password
 
 ---
 
-## 4. Create a GitLab Project
+## 5. Create a GitLab Project
 
 1. Log into GitLab at http://localhost:8080
 2. Click **"New Project"** → **"Create blank project"**
@@ -79,43 +104,11 @@ docker exec -it gitlab grep 'Password:' /etc/gitlab/initial_root_password
 ### Add GitLab as a remote
 
 ```bash
-cd ..   # Back to project root
+# In project root
 
 git remote add gitlab http://192.168.56.1:8080/root/ecommerce-project.git
 
 git push gitlab main
-# Enter: root / <your-password>
-```
-
----
-
-## 5. Configure the VM with Ansible
-
-Ansible runs **inside the VM** via Vagrant's `ansible_local` provisioner — no host Ansible install or WSL needed.
-
-```bash
-# From the project root
-vagrant provision
-```
-
-This takes 5-10 minutes and configures:
-- ✅ Docker CE + Docker Compose
-- ✅ Node Exporter (port 9100)
-- ✅ SSH port changed from 22 → 222
-- ✅ UFW firewall (allow 222, 8000, 9100)
-- ✅ GitLab Runner installed (not yet registered)
-
-### Verify
-
-```bash
-vagrant ssh
-
-docker --version          # Docker installed
-sudo ufw status           # Firewall active
-curl localhost:9100/metrics | head -5   # Node Exporter running
-sudo ss -tlnp | grep sshd              # SSH on port 222
-
-exit
 ```
 
 ---
@@ -124,7 +117,7 @@ exit
 
 ### Get the Registration Token
 
-1. In GitLab: **Admin Area** (wrench icon) → **CI/CD** → **Runners**
+1. In GitLab: **Admin Area** → **CI/CD** → **Runners**
 2. Click **"Register an instance runner"**
 3. Copy the registration token
 
@@ -139,16 +132,16 @@ vagrant provision
 > ```bash
 > vagrant ssh
 > cd /vagrant/ansible
-> ansible-playbook playbook.yml -i inventory/hosts.yml --tags gitlab_runner -e "gitlab_runner_token=YOUR_TOKEN_HERE"
+> ansible-playbook playbook.yml -i inventory/hosts.yml --tags gitlab_runner -e "gitlab_runner_token==YOUR_TOKEN_HERE"
 > ```
 
 ### Verify
 
-Go to GitLab → **Admin Area** → **CI/CD** → **Runners** — the runner should show as **online** (green dot).
+Go to GitLab → **Admin Area** → **CI/CD** → **Runners** — the runner should show as **online**.
 
-You can also verify on the VM:
+Verify on the VM:
 ```bash
-vagrant ssh -c "sudo gitlab-runner list"
+ssh -p 222 vagrant@192.168.56.10 -c "sudo gitlab-runner list"
 ```
 
 ---
@@ -165,17 +158,10 @@ The pipeline will:
 1. **Build**: Runner on VM runs `docker compose build`
 2. **Deploy**: Runner on VM runs `docker compose up -d`
 
-**No SSH keys or CI/CD variables needed** — the runner is already on the VM.
-
-### Monitor
-
-GitLab → your project → **CI/CD** → **Pipelines**
-
-First deployment takes 10-15 minutes (downloading Docker images, compiling source).
 
 ---
 
-## 8. Verify Everything Works
+## 8. Verify Everything is Working
 
 ### Application (Port 8000)
 
@@ -225,6 +211,7 @@ Expected:
 | Component        | URL / Command                               |
 |------------------|---------------------------------------------|
 | E-Commerce App   | http://192.168.56.10:8000                    |
+| Grafana (PLG)    | http://192.168.56.10:8000/grafana/           |
 | API Endpoint     | http://192.168.56.10:8000/api/products       |
 | Node Exporter    | http://192.168.56.10:9100/metrics            |
 | GitLab           | http://localhost:8080                         |
@@ -232,12 +219,3 @@ Expected:
 | Manual deploy    | `./scripts/deploy.sh 192.168.56.10`          |
 
 ---
-
-## Local Testing (Without VM)
-
-```bash
-cd ecommerce-app/
-cp .env.example .env
-docker compose up -d --build
-# Open http://localhost:8000
-```

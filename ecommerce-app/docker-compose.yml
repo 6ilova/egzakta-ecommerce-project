@@ -1,57 +1,20 @@
-# ============================================
-# Docker Compose — E-Commerce Application Stack
-# ============================================
-#
-# This file defines 3 services that make up the full application:
-#   1. db       — MySQL 8 database
-#   2. backend  — Spring Boot REST API
-#   3. frontend — Angular app served by Nginx
-#
-# HOW TO USE:
-#   cp .env.example .env        # Create environment file
-#   docker compose up -d --build # Build and start all services
-#   docker compose logs -f       # Watch logs
-#   docker compose down          # Stop everything
-#   docker compose down -v       # Stop and DELETE all data
-#
-# WHY NO 'version' KEY:
-#   The 'version' key (e.g., version: '3.8') is deprecated in Docker
-#   Compose V2 (the current standard). It was only needed for the old
-#   docker-compose V1 tool. Modern Docker Compose ignores it.
-#
-# NETWORKING:
-#   All services share the 'ecommerce-network' bridge network.
-#   They can reach each other by service name (e.g., 'db', 'backend').
-#   Docker's internal DNS resolves these names to container IPs.
-# ============================================
-
 services:
-  # ============================================
-  # MySQL Database
-  # ============================================
-  # WHY a separate Dockerfile instead of just 'image: mysql:8.0':
-  #   We need to copy SQL init scripts into the image. MySQL runs all
-  #   .sql files in /docker-entrypoint-initdb.d/ on first startup.
   db:
     build:
       context: .
       dockerfile: docker/db/Dockerfile
     container_name: ecommerce-db
     environment:
-      # These override the defaults in the Dockerfile.
-      # ${VAR:-default} syntax: use .env value if set, otherwise use default.
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-full-stack-ecommerce}
     ports:
       - "3306:3306"
     volumes:
-      # Named volume for data persistence. Without this, all data would
-      # be lost when the container is removed.
+      # Named volume for data persistence.
       - mysql-data:/var/lib/mysql
     networks:
       - ecommerce-network
-    # Healthcheck lets other services wait for MySQL to be TRULY ready
-    # (not just "container started", but "accepting connections").
+    # Healthcheck ensures backend only starts when MySQL is ready to accept connections
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
       interval: 10s
@@ -59,9 +22,7 @@ services:
       retries: 10
       start_period: 30s
 
-  # ============================================
   # Spring Boot Backend
-  # ============================================
   backend:
     build:
       context: .
@@ -78,24 +39,14 @@ services:
     ports:
       - "8090:8090"
     depends_on:
-      # WHY condition: service_healthy:
-      #   Without this, Docker starts the backend immediately after db starts.
-      #   But MySQL takes 15-30 seconds to initialize on first run.
-      #   The backend would crash with "Connection refused" and exit.
-      #   service_healthy waits for the healthcheck to pass first.
       db:
         condition: service_healthy
     networks:
       - ecommerce-network
     restart: unless-stopped
 
-  # ============================================
+
   # Angular Frontend (served by Nginx)
-  # ============================================
-  # WHY port 8000:
-  #   The task requirement specifies: "running on port 8000"
-  #   Nginx inside the container listens on port 80 (standard HTTP).
-  #   Docker maps host port 8000 → container port 80.
   frontend:
     build:
       context: .
@@ -110,7 +61,7 @@ services:
     restart: unless-stopped
 
   # ============================================
-  # Prometheus (Metrics Collection)
+  # PLG Stack
   # ============================================
   prometheus:
     image: prom/prometheus:latest
@@ -121,9 +72,6 @@ services:
       - ecommerce-network
     restart: unless-stopped
 
-  # ============================================
-  # Loki (Log Aggregation)
-  # ============================================
   loki:
     image: grafana/loki:latest
     container_name: loki
@@ -133,9 +81,6 @@ services:
       - ecommerce-network
     restart: unless-stopped
 
-  # ============================================
-  # Promtail (Docker Log Scraper)
-  # ============================================
   promtail:
     image: grafana/promtail:latest
     container_name: promtail
@@ -147,9 +92,6 @@ services:
       - ecommerce-network
     restart: unless-stopped
 
-  # ============================================
-  # Grafana (Visualization & Dashboards)
-  # ============================================
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -163,8 +105,7 @@ services:
       - ecommerce-network
     restart: unless-stopped
 
-# Named volume — persists MySQL data across container restarts.
-# To reset the database: docker compose down -v
+# persists MySQL data across container restarts.
 volumes:
   mysql-data:
     driver: local

@@ -1,58 +1,53 @@
-# ============================================
-# GitLab CI/CD Pipeline
-# ============================================
-#
-# WHAT THIS DOES:
-#   On every push to main/master, this pipeline:
-#   1. BUILDS Docker images for the application
-#   2. DEPLOYS the application on the VM via docker compose
-#
-# HOW IT WORKS:
-#   The GitLab Runner is installed directly on the Ubuntu VM (via Ansible)
-#   with a shell executor. This means CI/CD jobs run as the gitlab-runner
-#   user on the VM itself — no SSH needed.
-#
-#   Push to GitLab → GitLab assigns job → Runner on VM picks it up →
-#   Runner clones repo → Runs docker compose → App live on port 8000
-#
-# WHY NO SSH:
-#   The runner IS on the VM. It runs commands directly, not remotely.
-#   This is simpler and more reliable than SSH-based deployment.
-#
-# PREREQUISITES:
-#   1. GitLab Runner registered on the VM (via Ansible gitlab_runner role)
-#   2. Docker and Docker Compose installed on the VM (via Ansible docker role)
-#   3. gitlab-runner user in the docker group (done by Ansible)
-# ============================================
-
 stages:
   - build
   - deploy
 
-# ============================================
-# Build Stage
-# ============================================
-# Validates that all Docker images build successfully before deploying.
-# If the build fails, the deploy stage is skipped — production stays untouched.
-build:
+# Build jobs trigger only if files in their respective folders have changed
+build_frontend:
   stage: build
   tags:
     - vm
   script:
-    - echo "Building Docker images..."
+    - echo "Building Frontend image..."
     - cd ecommerce-app
-    - docker compose build
-    - echo "Build completed successfully"
-  only:
-    - main
-    - master
+    - docker compose build frontend
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+      changes:
+        - ecommerce-app/frontend/**/*
+        - ecommerce-app/docker/frontend/**/*
+        - ecommerce-app/docker-compose.yml
 
-# ============================================
-# Deploy Stage
-# ============================================
-# Runs directly on the VM (shell executor).
-# The runner already cloned the repo, so we just cd into
-# the ecommerce-app directory and run docker compose.
+build_backend:
+  stage: build
+  tags:
+    - vm
+  script:
+    - echo "Building Backend image..."
+    - cd ecommerce-app
+    - docker compose build backend
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+      changes:
+        - ecommerce-app/backend/**/*
+        - ecommerce-app/docker/backend/**/*
+        - ecommerce-app/docker-compose.yml
+
+build_db:
+  stage: build
+  tags:
+    - vm
+  script:
+    - echo "Building Database image..."
+    - cd ecommerce-app
+    - docker compose build db
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
+      changes:
+        - ecommerce-app/docker/db/**/*
+        - ecommerce-app/docker-compose.yml
+
+# Deploy always runs. Docker compose will intelligently restart only changed containers.
 deploy:
   stage: deploy
   tags:
@@ -60,26 +55,12 @@ deploy:
   script:
     - echo "Deploying application..."
     - cd ecommerce-app
-
-    # Create .env from template if it doesn't exist
     - cp -n .env.example .env 2>/dev/null || true
-
-    # Stop existing containers (if any)
-    - docker compose down --remove-orphans 2>/dev/null || true
-
-    # Build and start all services
-    - docker compose up -d --build
-
-    # Wait for services to start and MySQL to initialize
-    - echo "Waiting for services to start..."
-    - sleep 30
-
-    # Verify deployment
+    - docker compose up -d
     - echo "Checking service status..."
     - docker compose ps
     - echo "Deployment completed! App available at http://$(hostname -I | awk '{print $1}'):8000"
-  only:
-    - main
-    - master
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || $CI_COMMIT_BRANCH == "master"
   environment:
     name: production
