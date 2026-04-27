@@ -32,6 +32,7 @@
 #   the broader network. This is ideal for development.
 # ============================================
 
+
 Vagrant.configure("2") do |config|
   config.vm.box = "ubuntu/focal64"
   config.vm.hostname = "ecommerce-vm"
