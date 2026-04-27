@@ -10,9 +10,9 @@ import { ProductCategory } from '../model/product-category';
 })
 export class ProductService {
 
-  private baseUrl = "http://localhost:8090/api/products";
+  private baseUrl = "/api/products";
 
-  private categoryUrl = "http://localhost:8090/api/product-category";
+  private categoryUrl = "/api/product-category";
 
 
   // httpClient will be injected automatically by Angular's dependency injection
