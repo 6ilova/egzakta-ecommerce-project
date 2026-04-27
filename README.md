@@ -14,7 +14,11 @@ A complete DevOps solution for deploying a full-stack e-commerce application (An
 ├── README.md                              # This file
 ├── docs/
 │   ├── SETUP_GUIDE.md                     # Detailed step-by-step guide
-│   └── ARCHITECTURE.md                    # Architecture & data flow diagrams
+│   ├── ARCHITECTURE.md                    # Architecture & data flow diagrams
+│   ├── API_DOCUMENTATION.md               # API documentation
+│   └── CI_CD_PIPELINE.md                # CI/CD pipeline documentation
+│   └── INSTALLATION_GUIDE.md              # Installation guide
+│   └── DATABASE.md                        # Database documentation
 │
 ├── Vagrantfile                            # VM provisioning (Ubuntu 20.04)
 │
@@ -65,32 +69,160 @@ A complete DevOps solution for deploying a full-stack e-commerce application (An
 - [Docker](https://docs.docker.com/get-docker/) & Docker Compose (V2)
 - [VirtualBox](https://www.virtualbox.org/wiki/Downloads)
 - [Vagrant](https://www.vagrantup.com/downloads)
-- Ansible is installed automatically inside the VM by Vagrant (no host install needed)
 - [Git](https://git-scm.com/downloads)
+- Ansible is installed automatically inside the VM by Vagrant (no host install needed)
 
 ## Quick Start
 
-### 1. Clone and Prepare
+Look in [Installation Guide](./docs/INSTALLATION_GUIDE.md) for the complete walkthrough.
 
-```bash
-git clone https://github.com/<your-username>/egzakta-ecommerce-project.git
-cd egzakta-ecommerce-project
-cp ecommerce-app/.env.example ecommerce-app/.env
-```
+## Credentials & API Keys
 
-### 2. Run Locally with Docker Compose (Quick Test)
+| Service          | Username       | Password         | Notes                      |
+|------------------|----------------|------------------|----------------------------|
+| MySQL (root)     | `root`         | `root`           | Docker only                |
+| MySQL (app)      | `ecommerceapp` | `ecommerceapp`   | Application user           |
+| GitLab (initial) | `root`         | *auto-generated* | See setup guide            |
 
-```bash
-cd ecommerce-app/
-docker compose up -d --build
-# Wait ~30 seconds, then open http://localhost:8000
-```
-
-### 3. Full Setup (GitLab + VM + CI/CD)
-
-See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for the complete walkthrough.
+> **No external API keys are required.** All services run locally.
 
 ---
+
+## Docker 
+
+### Dockerfiles 
+
+All Dockerfiles are in `ecommerce-app/docker/` and use [multi-stage builds](https://docs.docker.com/build/building/multi-stage/):
+
+| Dockerfile | Build Stage | Runtime Stage | Final Size |
+|------------|-------------|---------------|------------|
+| Backend    | `maven:3.9-eclipse-temurin-8` | `eclipse-temurin:8-jre-alpine` | ~150MB |
+| Frontend   | `node:14-alpine` | `nginx:1.24-alpine` | ~30MB |
+| Database   | — | `mysql:8.0` | ~550MB |
+
+**Why multi-stage**: Build tools are discarded after compilation. Final image is 70-80% smaller.
+
+### API Proxy 
+
+The source   Angular app has hardcoded `http://localhost:8090/api` URLs. Nginx reverse-proxies `/api` to the backend container:
+
+```
+Browser → http://localhost:8000/api/products
+            ↓
+Nginx → http://backend:8090/api/products → Spring Boot → MySQL → response
+```
+
+See `ecommerce-app/docker/frontend/nginx.conf`.
+
+### Docker Compose Services
+
+| Service    | Int. Port | Ext. Port | Why |
+|------------|-----------|-----------|-----|
+| `db`       | 3306      | 3306      | MySQL default |
+| `backend`  | 8090      | 8090      | Set in application.properties |
+| `frontend` | 80        | **8000**  | Task requirement |
+| `prometheus`| 9090     | (internal)| Scrapes metrics from backend & Node Exporter |
+| `loki`     | 3100      | (internal)| Centralized log storage |
+| `promtail` | 9080      | (internal)| Reads Docker logs and sends to Loki |
+| `grafana`  | 3000      | (internal)| Visual UI (Proxied via Nginx at `/grafana/`) |
+
+---
+
+## Ansible
+
+### Role Execution Order
+
+```
+docker → node_exporter → sshd → ufw → gitlab_runner
+```
+
+**Why this order**: SSHD changes port to 222 **before** UFW blocks port 22. Reversing this would lock you out.
+
+### Roles
+
+| Role             | What It Does                                              |
+|------------------|-----------------------------------------------------------|
+| `docker`         | Installs Docker CE + Compose from official repo           |
+| `node_exporter`  | Binary install + systemd service on port 9100             |
+| `sshd`           | Changes SSH port 22 → 222                                 |
+| `ufw`            | Firewall: allow 222, 8000, 9100                           |
+| `gitlab_runner`  | Installs runner with **shell executor** + registers it    |
+
+### Why Shell Executor
+
+The runner uses `--executor "shell"` instead of `--executor "docker"`:
+- Jobs run directly on the VM as the `gitlab-runner` user
+- `docker compose` works natively against the host Docker daemon
+- No nested Docker containers, no socket mounts, no complexity
+- Docker build cache persists between jobs (faster builds)
+
+### Usage
+
+Ansible runs inside the VM via Vagrant's `ansible_local` provisioner — no host Ansible install or WSL needed.
+
+```bash
+# From the project root (PowerShell or any terminal)
+vagrant provision
+
+# Register the runner (after getting token from GitLab UI)
+vagrant provision --provision-with ansible_local -- --tags gitlab_runner \
+  -e "gitlab_runner_token=YOUR_TOKEN"
+```
+
+## CI/CD Pipeline
+
+### Pipeline Flow
+
+Piplane is runinng just for the part where we have made the changes on the e-commerce-app directory, it is not running for the entire project structure, so we have to make changes on the ecommerce-app directory to trigger the pipeline, after changes it will build the docker image and deploy it to the virtual machine, after that it will run the application on port 8000. For example if change is made on the frontend/angular-ecommerce/src/app/app.component.ts file, pipline will just trigger build for frontend.
+
+```
+git push → GitLab assigns job → Runner on VM picks it up
+         → Runner clones repo → cd ecommerce-app/
+         → docker compose build → docker compose up -d
+         → App live on port 8000
+```
+
+### Pipeline Stages
+
+1. **Build**: Runs `docker compose build` to validate all images compile
+2. **Deploy**: Runs `docker compose up -d` to start the application
+
+---
+
+## Troubleshooting
+
+### Frontend shows blank page or API errors
+Nginx proxies `/api` → `backend:8090/api`. Port 8090 is also exposed directly.
+
+### MySQL initialization fails
+```bash
+cd ecommerce-app/
+docker compose down -v && docker compose up -d --build
+```
+
+### Can't SSH after port change
+```bash
+ssh -p 222 vagrant@192.168.56.10
+```
+
+### GitLab is slow / uses too much RAM
+GitLab CE requires 4+ GB RAM. Ensure your host has at least 8GB total.
+
+### Runner can't reach GitLab
+The VM accesses GitLab at `http://192.168.56.1:8080` (host IP on VirtualBox network). Verify connectivity: `curl http://192.168.56.1:8080` from the VM.
+
+---
+
+## E-Commerce Application Source
+
+Cloned from [abhinav-nath/full-stack-ecommerce-project](https://github.com/abhinav-nath/full-stack-ecommerce-project):
+- **Frontend**: Angular 9 with Bootstrap 4
+- **Backend**: Spring Boot 2.2.7 with Spring Data REST (Java 8)
+- **Database**: MySQL 8 with 100 sample products
+
+## License
+
+This project is for interview/demonstration purposes.
 
 ## Quick Reference
 
@@ -105,14 +237,3 @@ See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for the complete walkthrough.
 | Manual deploy    | `./scripts/deploy.sh 192.168.56.10`          |
 
 ---
-
-## E-Commerce Application Source
-
-Cloned from [abhinav-nath/full-stack-ecommerce-project](https://github.com/abhinav-nath/full-stack-ecommerce-project):
-- **Frontend**: Angular 9 with Bootstrap 4
-- **Backend**: Spring Boot 2.2.7 with Spring Data REST (Java 8)
-- **Database**: MySQL 8 with 100 sample products
-
-## License
-
-This project is for interview/demonstration purposes.
