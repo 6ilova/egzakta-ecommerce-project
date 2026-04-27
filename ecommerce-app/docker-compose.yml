@@ -156,6 +156,9 @@ services:
     environment:
       - GF_SERVER_ROOT_URL=http://192.168.56.10:8000/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
+    volumes:
+      - ./docker/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - grafana-data:/var/lib/grafana
     networks:
       - ecommerce-network
     restart: unless-stopped
@@ -164,6 +167,8 @@ services:
 # To reset the database: docker compose down -v
 volumes:
   mysql-data:
+    driver: local
+  grafana-data:
     driver: local
 
 # Custom bridge network — all services can communicate by name.
