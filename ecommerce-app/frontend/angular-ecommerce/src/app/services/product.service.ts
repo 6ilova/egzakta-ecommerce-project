@@ -14,7 +14,6 @@ export class ProductService {
 
   private categoryUrl = "/api/product-category";
 
-
   // httpClient will be injected automatically by Angular's dependency injection
   constructor(private httpClient: HttpClient) { }
 
